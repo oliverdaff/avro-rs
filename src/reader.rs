@@ -2,6 +2,7 @@
 use crate::{decode::decode, schema::Schema, types::Value, util, AvroResult, Codec, Error};
 use serde_json::from_slice;
 use std::{
+    collections::HashMap,
     io::{ErrorKind, Read},
     str::FromStr,
 };
@@ -18,6 +19,7 @@ struct Block<R> {
     marker: [u8; 16],
     codec: Codec,
     writer_schema: Schema,
+    metadata: HashMap<String, Value>,
 }
 
 impl<R: Read> Block<R> {
@@ -30,8 +32,8 @@ impl<R: Read> Block<R> {
             buf_idx: 0,
             message_count: 0,
             marker: [0; 16],
+            metadata: HashMap::new(),
         };
-
         block.read_header()?;
         Ok(block)
     }
@@ -77,6 +79,7 @@ impl<R: Read> Block<R> {
             {
                 self.codec = codec;
             }
+            self.metadata = meta;
         } else {
             return Err(Error::GetHeaderMetadata);
         }
@@ -227,6 +230,10 @@ impl<'a, R: Read> Reader<'a, R> {
     /// Get a reference to the writer `Schema`.
     pub fn writer_schema(&self) -> &Schema {
         &self.block.writer_schema
+    }
+
+    pub fn writer_metadata(&self) -> &HashMap<String, Value> {
+        &self.block.metadata
     }
 
     /// Get a reference to the optional reader `Schema`.

@@ -30,6 +30,8 @@ pub struct Writer<'a, W> {
     num_values: usize,
     #[builder(default = std::iter::repeat_with(random).take(16).collect(), setter(skip))]
     marker: Vec<u8>,
+    #[builder(default)]
+    metadata: HashMap<String, Vec<u8>>,
     #[builder(default = false, setter(skip))]
     has_header: bool,
 }
@@ -279,10 +281,16 @@ impl<'a, W: Write> Writer<'a, W> {
         metadata.insert("avro.schema", Value::Bytes(schema_bytes));
         metadata.insert("avro.codec", self.codec.into());
 
+        let head_metadata: HashMap<&str, Value> = self
+            .metadata
+            .iter()
+            .map(|(k, v)| (k.as_str(), Value::Bytes(v.to_vec())))
+            .chain(metadata)
+            .collect();
         let mut header = Vec::new();
         header.extend_from_slice(AVRO_OBJECT_HEADER);
         encode(
-            &metadata.into(),
+            &head_metadata.into(),
             &Schema::Map(Box::new(Schema::Bytes)),
             &mut header,
         );
@@ -332,6 +340,8 @@ pub fn to_avro_datum<T: Into<Value>>(schema: &Schema, value: T) -> AvroResult<Ve
 
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use super::*;
     use crate::{
         decimal::Decimal,
@@ -791,6 +801,36 @@ mod tests {
         assert_eq!(
             &result[last_data_byte - data.len()..last_data_byte],
             data.as_slice()
+        );
+    }
+
+    #[test]
+    fn test_metadata() {
+        let schema = Schema::parse_str(SCHEMA).unwrap();
+        let mut writer = Writer::builder()
+            .writer(Vec::new())
+            .schema(&schema)
+            .codec(Codec::Deflate)
+            .metadata(
+                vec![("test".to_string(), "test_meta".into())]
+                    .into_iter()
+                    .collect(),
+            )
+            .block_size(100)
+            .build();
+        let record = TestSerdeSerialize {
+            a: 27,
+            b: "foo".to_owned(),
+        };
+
+        let _n1 = writer.append_ser(record).unwrap();
+        let _n2 = writer.flush().unwrap();
+        let result = writer.into_inner().unwrap();
+        let reader = crate::Reader::with_schema(&schema, result.as_slice()).unwrap();
+        let x = reader.writer_metadata();
+        assert_eq!(
+            Some(&Value::Bytes("test_meta".as_bytes().to_vec())),
+            x.get("test")
         );
     }
 }
